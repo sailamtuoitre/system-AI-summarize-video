@@ -1,0 +1,73 @@
+# ==========================================
+# CDIO 3 PROJECT - .GITIGNORE CONFIGURATION
+# ==========================================
+
+# --- PYTHON ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- REACT (apps/web-ui) ---
+apps/web-ui/node_modules/
+apps/web-ui/dist/
+apps/web-ui/dist-ssr/
+apps/web-ui/*.local
+apps/web-ui/.eslintcache
+apps/web-ui/.stylelintcache
+apps/web-ui/.prettiercache
+apps/web-ui/npm-debug.log*
+apps/web-ui/yarn-debug.log*
+apps/web-ui/yarn-error.log*
+
+# --- DATA & STORAGE (CHẶN DỮ LIỆU NGƯỜI DÙNG) ---
+# Giữ lại thư mục data/ nhưng chặn mọi thứ bên trong data/jobs/
+data/jobs/*
+!data/jobs/.gitkeep
+outputs/
+temp/
+*.mp4
+*.wav
+*.mp3
+*.jpg
+*.png
+
+# --- SENSITIVE INFORMATION (BẢO MẬT) ---
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# --- LOGS ---
+*.log
+backend.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- IDE & SYSTEM ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

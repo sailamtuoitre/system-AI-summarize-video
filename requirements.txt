@@ -1,0 +1,21 @@
+# Web Frameworks (FastAPI Backend)
+fastapi
+uvicorn
+
+# AI Frameworks (RAG & Qwen 3.6 Plus Orchestration)
+llama-index
+llama-index-llms-dashscope
+llama-index-embeddings-huggingface
+
+# Transcription & Audio/Video Processing
+faster-whisper
+moviepy
+opencv-python
+pydantic
+
+# Environment & Utilities
+python-dotenv
+uuid
+aiofiles
+httpx
+faiss-cpu
