@@ -9,28 +9,26 @@ interface StudioPanelProps {
   setActiveView: (view: 'chat' | 'flashcards' | 'quiz') => void;
 }
 
-const StudioPanel: React.FC<StudioPanelProps> = ({ 
-  jobId, jobState, isOpen, togglePanel, activeView, setActiveView 
+const StudioPanel: React.FC<StudioPanelProps> = ({
+  jobId, jobState, isOpen, togglePanel, activeView, setActiveView
 }) => {
-  const triggerFeature = async (featureName: string, targetView: 'flashcards' | 'quiz') => {
+  // Lưu ý: Flashcards và Mini-test đã được tự động tạo trong quá trình xử lý pipeline
+  // Không cần gọi API on-demand nữa, chỉ cần chuyển view để hiển thị
+  const triggerFeature = (featureName: string, targetView: 'flashcards' | 'quiz') => {
     if (!jobId) {
         alert("Vui lòng tải video!");
         return;
     }
-    
-    // Switch view immediately if ready
-    if (jobState?.features?.[featureName === 'mini_test' ? 'mini_test' : 'flashcards'] === 'ready') {
-        setActiveView(targetView);
-        return;
-    }
 
-    try {
-      setActiveView(targetView); // Switch to show "please wait" state
-      await fetch(`http://localhost:8000/job/${jobId}/feature/${featureName}`, {
-        method: 'POST'
-      });
-    } catch (error) {
-      console.error(`Failed to trigger ${featureName}:`, error);
+    // Kiểm tra xem tính năng đã sẵn sàng chưa
+    const featureStatus = jobState?.features?.[featureName === 'mini_test' ? 'mini_test' : 'flashcards'];
+    
+    if (featureStatus === 'ready') {
+        setActiveView(targetView);
+    } else if (featureStatus === 'processing') {
+        alert("Tính năng đang được xử lý. Vui lòng đợi trong giây lát...");
+    } else {
+        alert("Tính năng chưa khả dụng. Vui lòng đợi pipeline xử lý xong.");
     }
   };
 

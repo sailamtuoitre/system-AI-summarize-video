@@ -70,13 +70,13 @@ class VideoOrchestrator:
             
             self.job_manager.update_latency(job_id, "transcription", time.time() - start_time)
 
-            # 3. Lập chỉ mục RAG (Indexing)
+            # 3. Lập chỉ mục RAG (Indexing) - Tích hợp cả keyframes cho visual evidence
             self.job_manager.update_status(job_id, JobStatus.INDEXING)
             start_time = time.time()
             index_path = os.path.join(job_dir, "index")
-            
-            # Gộp thông tin keyframes vào metadata của segments nếu trùng mốc thời gian (Option)
-            if not self.rag_service.build_index_from_segments(segments, index_path):
+
+            # Xây dựng index với keyframes metadata
+            if not self.rag_service.build_index_from_segments(segments, index_path, keyframes=keyframes):
                 raise Exception("Lỗi khi xây dựng Index.")
             
             self.job_manager.update_latency(job_id, "indexing", time.time() - start_time)

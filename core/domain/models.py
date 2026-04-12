@@ -49,6 +49,7 @@ class JobState(BaseModel):
     """Trạng thái tổng thể và quản lý dữ liệu của một Job xử lý."""
     job_id: str
     video_path: str
+    filename: Optional[str] = Field(None, description="Tên file video gốc")
     status: JobStatus = JobStatus.PENDING
     created_at: datetime = Field(default_factory=datetime.now)
     completed_at: Optional[datetime] = None

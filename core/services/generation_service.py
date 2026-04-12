@@ -1,6 +1,6 @@
 import logging
 from typing import List, Dict, Any, Optional
-from llama_index.llms.dashscope import DashScope, DashScopeModelName
+from llama_index.llms.dashscope import DashScope, DashScopeGenerationModels
 from core.domain.models import SummaryOutput, Flashcard, QuizQuestion, Evidence
 import json
 import os
@@ -15,12 +15,13 @@ class GenerationService:
     def __init__(self, api_key: str, model_name: str = "qwen-3.6-plus"):
         """
         Khởi tạo GenerationService.
-        
+
         Args:
             api_key (str): DashScope API Key.
             model_name (str): Tên mô hình Qwen sử dụng (mặc định qwen-3.6-plus).
         """
         self.llm = DashScope(model=model_name, api_key=api_key)
+        self.model_name = model_name
         logger.info(f"Đã khởi tạo GenerationService với mô hình Qwen: {model_name}")
 
     def generate_summary(self, context_nodes: List[Dict[str, Any]]) -> SummaryOutput:
@@ -55,7 +56,7 @@ class GenerationService:
                 "  \"quiz\": [{\"question\": \"...\", \"options\": [\"A\", \"B\", \"C\", \"D\"], \"answer\": \"...\", \"explanation\": \"...\", \"timestamp\": \"mm:ss\"}]\n"
                 "}"
             )
-            
+
             try:
                 response = self.llm.complete(map_prompt)
                 # Parse JSON từ response của Qwen
@@ -63,26 +64,38 @@ class GenerationService:
                 start = text.find('{')
                 end = text.rfind('}') + 1
                 data = json.loads(text[start:end])
-                
+
                 all_partials.append(data.get("summary", ""))
-                
-                # Lưu trữ flashcards & quiz thô
+
+                # Lưu trữ flashcards & quiz thô với source_node_id
                 for card in data.get("flashcards", []):
+                    # Lấy node_id từ node đầu tiên trong chunk làm source
+                    source_node = chunk[0] if chunk else None
                     self.extracted_flashcards.append(Flashcard(
                         front=card["front"],
                         back=card["back"],
-                        evidence=Evidence(timestamp=card["timestamp"], quote=card["quote"])
+                        evidence=Evidence(
+                            timestamp=card["timestamp"], 
+                            quote=card["quote"],
+                            source_node_id=source_node["node_id"] if source_node else "unknown"
+                        )
                     ))
-                
+
                 for q in data.get("quiz", []):
+                    # Lấy node_id từ node đầu tiên trong chunk làm source
+                    source_node = chunk[0] if chunk else None
                     self.extracted_quiz.append(QuizQuestion(
                         question=q["question"],
                         options=q["options"],
                         answer=q["answer"],
                         explanation=q["explanation"],
-                        evidence=Evidence(timestamp=q["timestamp"], quote="")
+                        evidence=Evidence(
+                            timestamp=q["timestamp"],
+                            quote="",
+                            source_node_id=source_node["node_id"] if source_node else "unknown"
+                        )
                     ))
-                
+
                 logger.info(f"Đã trích xuất xong kiến thức cho chunk {i+1}/{len(node_chunks)}")
             except Exception as e:
                 logger.error(f"Lỗi Map phase tại chunk {i+1}: {str(e)}")

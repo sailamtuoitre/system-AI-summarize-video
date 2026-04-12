@@ -45,8 +45,12 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     setActiveView('chat');
 
     try {
-      const response = await fetch(`http://localhost:8000/job/${jobId}/chat?question=${encodeURIComponent(textToSend)}`, {
-        method: 'POST'
+      const response = await fetch(`http://localhost:8000/job/${jobId}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ question: textToSend })
       });
       if (response.ok) {
         const data = await response.json();

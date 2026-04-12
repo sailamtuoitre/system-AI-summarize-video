@@ -21,6 +21,17 @@ const MiniTestView: React.FC<MiniTestViewProps> = ({ questions, onExplain }) => 
   const [isFinished, setIsFinished] = useState(false);
   const [wrongQuestions, setWrongQuestions] = useState<QuizQuestion[]>([]);
 
+  // Function để reset quiz thay vì reload toàn bộ trang
+  const resetQuiz = () => {
+    setCurrentIndex(0);
+    setSelectedOption(null);
+    setIsAnswered(false);
+    setScore(0);
+    setTimeLeft(120);
+    setIsFinished(false);
+    setWrongQuestions([]);
+  };
+
   useEffect(() => {
     if (timeLeft > 0 && !isFinished) {
       const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
@@ -149,7 +160,7 @@ const MiniTestView: React.FC<MiniTestViewProps> = ({ questions, onExplain }) => 
             </button>
           )}
 
-          <button className="restart-btn" onClick={() => window.location.reload()}>Làm bài mới</button>
+          <button className="restart-btn" onClick={resetQuiz}>Làm bài mới</button>
         </div>
       )}
 

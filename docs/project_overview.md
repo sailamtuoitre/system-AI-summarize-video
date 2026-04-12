@@ -1,5 +1,12 @@
 # Tổng quan Dự án: MVP AI Video Assistant (v0.3)
 
+## Cập nhật v0.3
+- Tự động hóa tạo Flashcards/Quiz trong pipeline (tiết kiệm thời gian)
+- Tích hợp visual evidence từ keyframes vào RAG
+- Cải thiện bảo mật CORS (localhost only)
+- Cải thiện UX: Job status hiển thị chi tiết, reset quiz không reload
+- Đồng bộ phiên bản tài liệu lên v0.3
+
 ## 1. Giới thiệu
 Công cụ hỗ trợ học tập thông minh dựa trên video bài giảng. Hệ thống sử dụng AI đa phương thức để "xem", "nghe" và "hiểu" nội dung video dài, giúp sinh viên ôn tập nhanh chóng.
 
@@ -14,9 +21,11 @@ Công cụ hỗ trợ học tập thông minh dựa trên video bài giảng. H�
     - **Multi-modal Summary:** Tóm tắt kết hợp Transcript và OCR Slide.
     - **Long Video Handling:** Kỹ thuật Map-Reduce giúp tóm tắt video dài mà không mất ý.
     - **Visual Evidence:** Chụp lại ảnh slide bài giảng liên quan đến câu trả lời.
-- **Tính năng bổ trợ (On-Demand):**
-    - **Flashcards:** Sinh 5-10 thẻ ghi nhớ.
-    - **Mini-test:** Sinh câu hỏi trắc nghiệm kiểm tra kiến thức.
+    - **Auto Flashcards:** Tự động sinh 5-10 thẻ ghi nhớ trong pipeline.
+    - **Auto Mini-test:** Tự động sinh câu hỏi trắc nghiệm kiểm tra kiến thức.
+- **Tính năng tương tác:**
+    - **Chat Q&A:** Hỏi đáp với AI, có trích dẫn timestamp và visual evidence.
+    - **Studio Panel:** Xem tóm tắt, flashcards và quiz (đã sẵn sàng).
 
 ## 5. Công nghệ AI sử dụng
 

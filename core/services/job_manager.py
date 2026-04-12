@@ -33,10 +33,10 @@ class JobManager:
     def create_job(self, video_filename: str) -> JobState:
         """
         Khởi tạo một Job mới.
-        
+
         Args:
             video_filename (str): Tên file video gốc.
-            
+
         Returns:
             JobState: Đối tượng trạng thái job vừa khởi tạo.
         """
@@ -45,13 +45,14 @@ class JobManager:
         job_dir.mkdir(parents=True, exist_ok=True)
 
         video_path = str(job_dir / "video.mp4")
-        
+
         job_state = JobState(
             job_id=job_id,
             video_path=video_path,
+            filename=video_filename,
             status=JobStatus.PENDING
         )
-        
+
         self.save_job_state(job_state)
         return job_state
 

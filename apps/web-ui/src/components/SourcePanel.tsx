@@ -13,6 +13,21 @@ interface SourcePanelProps {
 const SourcePanel: React.FC<SourcePanelProps> = ({ currentJobId, setCurrentJobId, jobState, allJobs, refreshJobs, isOpen, togglePanel }) => {
   const [isUploading, setIsUploading] = useState(false);
 
+  // Helper function để hiển thị trạng thái job
+  const getStatusDisplay = (status: string) => {
+    const statusMap: Record<string, { icon: string; text: string; color?: string }> = {
+      'pending': { icon: '⏳', text: 'Đang chờ xử lý...' },
+      'extracting_audio': { icon: '🎵', text: 'Đang trích xuất âm thanh...' },
+      'transcribing': { icon: '🎤', text: 'Đang chuyển giọng thành văn bản...' },
+      'indexing': { icon: '📊', text: 'Đang xây dựng chỉ mục...' },
+      'generating_summary': { icon: '📝', text: 'Đang tạo tóm tắt...' },
+      'completed': { icon: '✅', text: '✓ Đã xử lý hoàn tất' },
+      'failed': { icon: '❌', text: '✕ Xử lý thất bại' },
+    };
+    const statusInfo = statusMap[status] || { icon: '⏳', text: 'Đang trong hàng đợi...' };
+    return `${statusInfo.icon} ${statusInfo.text}`;
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -68,7 +83,7 @@ const SourcePanel: React.FC<SourcePanelProps> = ({ currentJobId, setCurrentJobId
             </svg>
           </div>
           <div className="upload-title">{isUploading ? 'Đang tải lên...' : 'Thêm video học thuật'}</div>
-          <div className="upload-sub">MP4 · Tối đa 15 phút</div>
+          <div className="upload-sub">MP4 · Khuyến nghị &lt; 120 phút</div>
           <button 
             className="btn-upload" 
             disabled={isUploading}
@@ -108,7 +123,7 @@ const SourcePanel: React.FC<SourcePanelProps> = ({ currentJobId, setCurrentJobId
               >
                 <div className="card-title">{job.filename || 'Video bài giảng'}</div>
                 <div className="card-subtitle">
-                  {job.status === 'completed' ? '✓ Đã xử lý hoàn tất' : '⏳ Đang trong hàng đợi...'}
+                  {getStatusDisplay(job.status)}
                 </div>
               </div>
             );

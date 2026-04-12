@@ -15,7 +15,6 @@ pydantic
 
 # Environment & Utilities
 python-dotenv
-uuid
 aiofiles
 httpx
 faiss-cpu

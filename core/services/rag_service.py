@@ -30,20 +30,30 @@ class RAGService:
         m, s = divmod(int(seconds), 60)
         return f"{m:02d}:{s:02d}"
 
-    def build_index_from_segments(self, segments: List[Dict[str, Any]], storage_path: str) -> bool:
+    def build_index_from_segments(self, segments: List[Dict[str, Any]], storage_path: str, 
+                                   keyframes: Optional[List[Dict[str, Any]]] = None) -> bool:
         """
-        Xây dựng vector index từ các segments của transcript.
-        
+        Xây dựng vector index từ các segments của transcript và keyframes.
+
         Args:
             segments (List[Dict[str, Any]]): Danh sách các phân đoạn văn bản từ Whisper.
             storage_path (str): Đường dẫn lưu trữ index cục bộ.
-            
+            keyframes (Optional[List[Dict[str, Any]]]): Danh sách keyframes để tích hợp visual evidence.
+
         Returns:
             bool: True nếu xây dựng thành công, False nếu có lỗi.
         """
         try:
             documents = []
             for seg in segments:
+                # Tìm keyframes gần với segment này (trong vòng 30 giây)
+                related_keyframes = []
+                if keyframes:
+                    for kf in keyframes:
+                        time_diff = abs(kf["timestamp"] - seg["start"])
+                        if time_diff <= 30:  # Keyframe trong vòng 30 giây
+                            related_keyframes.append(kf)
+
                 # Mỗi segment coi như một document nhỏ với đầy đủ metadata
                 doc = Document(
                     text=seg["text"],
@@ -51,24 +61,26 @@ class RAGService:
                         "start_time": seg["start"],
                         "end_time": seg["end"],
                         "timestamp_mmss": self._format_timestamp(seg["start"]),
-                        "segment_id": seg["id"]
+                        "segment_id": seg["id"],
+                        "has_visual_evidence": len(related_keyframes) > 0,
+                        "keyframes": related_keyframes  # Lưu thông tin keyframes
                     }
                 )
                 documents.append(doc)
 
-            logger.info(f"Bắt đầu xây dựng Index từ {len(documents)} phân đoạn...")
-            
+            logger.info(f"Bắt đầu xây dựng Index từ {len(documents)} phân đoạn (với {len(keyframes or [])} keyframes)...")
+
             # Tạo index từ các documents
             self._index = VectorStoreIndex.from_documents(
-                documents, 
+                documents,
                 embed_model=self.embed_model,
                 transformations=[self.node_parser]
             )
-            
+
             # Lưu index xuống ổ đĩa
             Path(storage_path).mkdir(parents=True, exist_ok=True)
             self._index.storage_context.persist(persist_dir=storage_path)
-            
+
             logger.info(f"Đã xây dựng và lưu Index thành công tại: {storage_path}")
             return True
 

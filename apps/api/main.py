@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import os
 import shutil
 from dotenv import load_dotenv
@@ -16,10 +17,15 @@ load_dotenv()
 
 app = FastAPI(title="AI Video Assistant API (Qwen 3.6 Plus Optimized)")
 
-# Cấu hình CORS
+# Request models
+class ChatRequest(BaseModel):
+    """Request body cho endpoint chat."""
+    question: str
+
+# Cấu hình CORS - Chỉ cho phép frontend local truy cập
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -89,20 +95,20 @@ async def trigger_feature(job_id: str, feature_name: str, background_tasks: Back
     return {"message": f"Đang bắt đầu xử lý {feature_name}"}
 
 @app.post("/job/{job_id}/chat")
-async def chat_with_video(job_id: str, question: str):
+async def chat_with_video(job_id: str, request: ChatRequest):
     """Hỏi đáp dựa trên nội dung video."""
     job_state = job_manager.get_job_state(job_id)
     if not job_state:
         raise HTTPException(status_code=404, detail="Không tìm thấy job")
-    
+
     # Load index để retrieve
     index_path = os.path.join(os.path.dirname(job_state.video_path), "index")
     rag_service.load_index(index_path)
-    
+
     # Retrieve & Answer
-    nodes = rag_service.query(question, top_k=5)
-    result = generation_service.answer_question(question, nodes)
-    
+    nodes = rag_service.query(request.question, top_k=5)
+    result = generation_service.answer_question(request.question, nodes)
+
     return result
 
 if __name__ == "__main__":
