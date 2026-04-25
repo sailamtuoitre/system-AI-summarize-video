@@ -1,9 +1,14 @@
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
-from llama_index.llms.dashscope import DashScope, DashScopeGenerationModels
+from llama_index.llms.openai import OpenAI
 from core.domain.models import SummaryOutput, Flashcard, QuizQuestion, Evidence
 import json
-import os
+
+# Maximum number of concurrent LLM calls during the Map phase. Tune via env
+# to respect 9router rate limits. 4-6 is a good default for most Qwen plans.
+MAP_PHASE_CONCURRENCY = int(os.getenv("MAP_PHASE_CONCURRENCY", "4"))
 
 logger = logging.getLogger(__name__)
 
@@ -12,17 +17,22 @@ class GenerationService:
     Dịch vụ sinh nội dung sử dụng LLM (Alibaba Qwen) thông qua DashScope.
     """
 
-    def __init__(self, api_key: str, model_name: str = "qwen-3.6-plus"):
+    def __init__(self, api_key: str, model_name: str = "qwen-3.6-plus", base_url: Optional[str] = None):
         """
         Khởi tạo GenerationService.
 
         Args:
-            api_key (str): DashScope API Key.
-            model_name (str): Tên mô hình Qwen sử dụng (mặc định qwen-3.6-plus).
+            api_key (str): API Key (từ 9router hoặc trực tiếp).
+            model_name (str): Tên mô hình sử dụng.
+            base_url (str, optional): Base URL cho API (dùng cho 9router).
         """
-        self.llm = DashScope(model=model_name, api_key=api_key)
+        self.llm = OpenAI(model=model_name, api_key=api_key, api_base=base_url)
         self.model_name = model_name
-        logger.info(f"Đã khởi tạo GenerationService với mô hình Qwen: {model_name}")
+        # Initialize extracted materials so get_extracted_materials() never raises
+        # AttributeError if called before generate_summary().
+        self.extracted_flashcards: List[Flashcard] = []
+        self.extracted_quiz: List[QuizQuestion] = []
+        logger.info(f"Đã khởi tạo GenerationService với mô hình: {model_name} qua {base_url or 'Direct API'}")
 
     def generate_summary(self, context_nodes: List[Dict[str, Any]]) -> SummaryOutput:
         """
@@ -36,15 +46,16 @@ class GenerationService:
         CHUNK_SIZE = 15
         node_chunks = [context_nodes[i:i + CHUNK_SIZE] for i in range(0, len(context_nodes), CHUNK_SIZE)]
         
-        all_partials = []
+        all_partials: List[str] = [""] * len(node_chunks)  # preserve chunk order
         self.extracted_flashcards = []
         self.extracted_quiz = []
 
-        # Giai đoạn 1: Map (Tóm tắt + Trích xuất Flashcard/Quiz cho từng đoạn)
-        for i, chunk in enumerate(node_chunks):
-            chunk_text = "\n".join([f"[{n['metadata']['timestamp_mmss']}] {n['text']}" for n in chunk])
-            map_prompt = (
-                f"Đây là phần {i+1}/{len(node_chunks)} của một video bài giảng:\n\n{chunk_text}\n\n"
+        def _build_map_prompt(idx: int, chunk: List[Dict[str, Any]]) -> str:
+            chunk_text = "\n".join(
+                f"[{n['metadata']['timestamp_mmss']}] {n['text']}" for n in chunk
+            )
+            return (
+                f"Đây là phần {idx+1}/{len(node_chunks)} của một video bài giảng:\n\n{chunk_text}\n\n"
                 "Nhiệm vụ của bạn:\n"
                 "1. Tóm tắt 3-5 ý chính của đoạn này.\n"
                 "2. Tạo 2 Flashcards quan trọng (Front/Back/Evidence/Timestamp).\n"
@@ -57,48 +68,85 @@ class GenerationService:
                 "}"
             )
 
+        def _run_one(idx: int, chunk: List[Dict[str, Any]]) -> tuple[int, Optional[Dict[str, Any]]]:
+            """Run a single Map prompt; returns (chunk_index, parsed_data_or_None)."""
             try:
-                response = self.llm.complete(map_prompt)
-                # Parse JSON từ response của Qwen
+                response = self.llm.complete(_build_map_prompt(idx, chunk))
                 text = response.text
-                start = text.find('{')
-                end = text.rfind('}') + 1
-                data = json.loads(text[start:end])
-
-                all_partials.append(data.get("summary", ""))
-
-                # Lưu trữ flashcards & quiz thô với source_node_id
-                for card in data.get("flashcards", []):
-                    # Lấy node_id từ node đầu tiên trong chunk làm source
-                    source_node = chunk[0] if chunk else None
-                    self.extracted_flashcards.append(Flashcard(
-                        front=card["front"],
-                        back=card["back"],
-                        evidence=Evidence(
-                            timestamp=card["timestamp"], 
-                            quote=card["quote"],
-                            source_node_id=source_node["node_id"] if source_node else "unknown"
-                        )
-                    ))
-
-                for q in data.get("quiz", []):
-                    # Lấy node_id từ node đầu tiên trong chunk làm source
-                    source_node = chunk[0] if chunk else None
-                    self.extracted_quiz.append(QuizQuestion(
-                        question=q["question"],
-                        options=q["options"],
-                        answer=q["answer"],
-                        explanation=q["explanation"],
-                        evidence=Evidence(
-                            timestamp=q["timestamp"],
-                            quote="",
-                            source_node_id=source_node["node_id"] if source_node else "unknown"
-                        )
-                    ))
-
-                logger.info(f"Đã trích xuất xong kiến thức cho chunk {i+1}/{len(node_chunks)}")
+                start = text.find("{")
+                end = text.rfind("}") + 1
+                if start == -1 or end <= start:
+                    raise ValueError("Khong tim thay JSON trong phan hoi LLM")
+                return idx, json.loads(text[start:end])
             except Exception as e:
-                logger.error(f"Lỗi Map phase tại chunk {i+1}: {str(e)}")
+                logger.error("Loi Map phase tai chunk %d: %s", idx + 1, e)
+                return idx, None
+
+        # Giai đoạn 1: Map (chạy song song để giảm latency tổng).
+        max_workers = max(1, min(MAP_PHASE_CONCURRENCY, len(node_chunks)))
+        logger.info(
+            "Map phase: %d chunk, concurrency=%d", len(node_chunks), max_workers
+        )
+        with ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="map"
+        ) as pool:
+            futures = [
+                pool.submit(_run_one, i, chunk)
+                for i, chunk in enumerate(node_chunks)
+            ]
+            for fut in as_completed(futures):
+                idx, data = fut.result()
+                if data is None:
+                    continue
+                chunk = node_chunks[idx]
+                source_node = chunk[0] if chunk else None
+                source_id = source_node["node_id"] if source_node else "unknown"
+
+                all_partials[idx] = data.get("summary", "")
+
+                for card in data.get("flashcards", []) or []:
+                    try:
+                        self.extracted_flashcards.append(
+                            Flashcard(
+                                front=card["front"],
+                                back=card["back"],
+                                evidence=Evidence(
+                                    timestamp=card.get("timestamp", "00:00"),
+                                    quote=card.get("quote", ""),
+                                    source_node_id=source_id,
+                                ),
+                            )
+                        )
+                    except (KeyError, TypeError) as e:
+                        logger.warning(
+                            "Bo qua flashcard malformed o chunk %d: %s", idx + 1, e
+                        )
+
+                for q in data.get("quiz", []) or []:
+                    try:
+                        self.extracted_quiz.append(
+                            QuizQuestion(
+                                question=q["question"],
+                                options=q["options"],
+                                answer=q["answer"],
+                                explanation=q.get("explanation", ""),
+                                evidence=Evidence(
+                                    timestamp=q.get("timestamp", "00:00"),
+                                    quote="",
+                                    source_node_id=source_id,
+                                ),
+                            )
+                        )
+                    except (KeyError, TypeError) as e:
+                        logger.warning(
+                            "Bo qua quiz malformed o chunk %d: %s", idx + 1, e
+                        )
+
+                logger.info(
+                    "Da trich xuat xong kien thuc cho chunk %d/%d",
+                    idx + 1,
+                    len(node_chunks),
+                )
 
         # Giai đoạn 2: Reduce (Tổng hợp bản tóm tắt cuối cùng)
         full_context = "\n\n".join(all_partials)

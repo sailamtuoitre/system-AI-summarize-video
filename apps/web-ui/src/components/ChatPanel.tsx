@@ -1,16 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import FlashcardsView from './FlashcardsView';
 import MiniTestView from './MiniTestView';
+import type { ChatResponse, JobState } from '../types/api';
 
 interface ChatPanelProps {
   jobId: string | null;
-  jobState: any;
+  jobState: JobState | null;
   isSourceOpen: boolean;
   isStudioOpen: boolean;
   toggleSource: () => void;
   toggleStudio: () => void;
   activeView: 'chat' | 'flashcards' | 'quiz';
   setActiveView: (view: 'chat' | 'flashcards' | 'quiz') => void;
+  apiBaseUrl: string;
 }
 
 interface Message {
@@ -20,7 +22,7 @@ interface Message {
 }
 
 const ChatPanel: React.FC<ChatPanelProps> = ({ 
-  jobId, jobState, isSourceOpen, isStudioOpen, toggleSource, toggleStudio, activeView, setActiveView 
+  jobId, jobState, isSourceOpen, isStudioOpen, toggleSource, toggleStudio, activeView, setActiveView, apiBaseUrl
 }) => {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'ai', content: 'Tôi đã phân tích video bài giảng. Bạn có thể hỏi bất kỳ điều gì về nội dung bài học!' }
@@ -35,6 +37,17 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   }, [messages, activeView]);
 
+  useEffect(() => {
+    setMessages([
+      {
+        role: 'ai',
+        content: jobId
+          ? 'Mình đã chuyển sang video hiện tại. Bạn có thể hỏi về nội dung của video này.'
+          : 'Tôi đã phân tích video bài giảng. Bạn có thể hỏi bất kỳ điều gì về nội dung bài học!'
+      }
+    ]);
+  }, [jobId]);
+
   const handleSend = async (customPrompt?: string) => {
     const textToSend = customPrompt || input;
     if (!textToSend.trim() || !jobId || isLoading) return;
@@ -45,7 +58,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     setActiveView('chat');
 
     try {
-      const response = await fetch(`http://localhost:8000/job/${jobId}/chat`, {
+      const response = await fetch(`${apiBaseUrl}/job/${jobId}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -53,11 +66,17 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         body: JSON.stringify({ question: textToSend })
       });
       if (response.ok) {
-        const data = await response.json();
+        const data: ChatResponse = await response.json();
         setMessages(prev => [...prev, { 
           role: 'ai', 
           content: data.answer,
           sources: data.sources
+        }]);
+      } else {
+        const errorData = await response.json().catch(() => ({ detail: 'Chat không thành công.' }));
+        setMessages(prev => [...prev, {
+          role: 'ai',
+          content: typeof errorData.detail === 'string' ? errorData.detail : 'Chat không thành công.'
         }]);
       }
     } catch (error) {

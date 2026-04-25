@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import type { JobState } from '../types/api';
 
 interface StudioPanelProps {
   jobId: string | null;
-  jobState: any;
+  jobState: JobState | null;
   isOpen: boolean;
   togglePanel: () => void;
   activeView: 'chat' | 'flashcards' | 'quiz';

@@ -1,149 +1,224 @@
 import logging
-import time
-from typing import Optional
-from core.services.job_manager import JobManager
-from core.services.transcription_service import TranscriptionService
-from core.services.rag_service import RAGService
-from core.services.generation_service import GenerationService
-from infra.audio_extractor import AudioExtractor
-from infra.visual_processor import VisualProcessingService
-from core.domain.models import JobState, JobStatus, FeatureStatus
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+from core.domain.models import FeatureStatus, JobStatus
+from core.services.generation_service import GenerationService
+from core.services.job_manager import JobManager
+from core.services.rag_service import RAGService
+from core.services.transcription_service import TranscriptionService
+from infra.media_demux import MediaDemuxer
+from infra.scene_detector import SceneDetector
 
 logger = logging.getLogger(__name__)
 
+
 class VideoOrchestrator:
     """
-    Điều phối viên trung tâm (Orchestrator) sử dụng model Qwen 3.6 Plus
-    để quản lý pipeline xử lý video đa phương thức (Audio + Visual).
+    Dieu phoi pipeline xu ly video.
+
+    Phase 1 flow:
+      1. MediaDemuxer (ffmpeg)        -> audio.wav + frames/  (single decode pass)
+      2. SceneDetector (PySceneDetect)-> keyframes per scene
+      3. TranscriptionService         -> Whisper on full audio (no chunk math)
+      4. RAGService                   -> FAISS index (segments + keyframes)
+      5. GenerationService            -> summary + flashcards + quiz
+
+    Compared to the old chunked pipeline, this avoids 2-3 redundant decodes
+    of the source video and removes the moviepy dependency from the hot path.
     """
 
     def __init__(
-        self, 
+        self,
         job_manager: JobManager,
-        audio_extractor: AudioExtractor,
-        visual_processor: VisualProcessingService,
+        media_demuxer: MediaDemuxer,
+        scene_detector: SceneDetector,
         transcription_service: TranscriptionService,
         rag_service: RAGService,
-        generation_service: GenerationService
+        generation_service: GenerationService,
     ):
         self.job_manager = job_manager
-        self.audio_extractor = audio_extractor
-        self.visual_processor = visual_processor
+        self.media_demuxer = media_demuxer
+        self.scene_detector = scene_detector
         self.transcription_service = transcription_service
         self.rag_service = rag_service
         self.generation_service = generation_service
 
     def run_initial_pipeline(self, job_id: str) -> bool:
-        """
-        Chạy luồng xử lý đa phương thức: Video -> Audio/Visual -> Transcribe/OCR -> Index -> Qwen Summary.
-        """
         try:
             job_state = self.job_manager.get_job_state(job_id)
             if not job_state:
                 return False
 
             job_dir = os.path.dirname(job_state.video_path)
+
+            # ------------------------------------------------------------------
+            # 1. Demux audio + frames (one ffmpeg pass)
+            # ------------------------------------------------------------------
+            self.job_manager.update_status(job_id, JobStatus.EXTRACTING_AUDIO)
+            t0 = time.time()
+            demux = self.media_demuxer.run(job_state.video_path, job_dir)
+            self.job_manager.update_latency(job_id, "demux", time.time() - t0)
+
+            if demux.audio_path is None:
+                logger.warning(
+                    "Job %s: video khong co audio, se chi dung visual.", job_id
+                )
+
+            # ------------------------------------------------------------------
+            # 2 + 3. Scene detection || Transcription  (Phase 2: parallel)
+            # ------------------------------------------------------------------
+            # Both are CPU-bound but release the GIL (ctranslate2 in faster-whisper,
+            # OpenCV/numpy in PySceneDetect), so threads overlap effectively.
+            self.job_manager.update_status(job_id, JobStatus.TRANSCRIBING)
             keyframes_dir = os.path.join(job_dir, "keyframes")
 
-            # 1. Trích xuất Đa phương thức (Audio & Visual)
-            self.job_manager.update_status(job_id, JobStatus.EXTRACTING_AUDIO)
-            start_time = time.time()
-            
-            # Tách Audio
-            audio_path = job_state.video_path.replace(".mp4", ".wav")
-            self.audio_extractor.extract_audio(job_state.video_path, audio_path)
-            
-            # Tách Keyframes (Slides) - Tính năng mới cho Qwen 3.6 Plus
-            logger.info(f"Đang trích xuất Keyframes cho Job {job_id}...")
-            keyframes = self.visual_processor.extract_keyframes(job_state.video_path, keyframes_dir)
-            
-            self.job_manager.update_latency(job_id, "extraction_multi_modal", time.time() - start_time)
+            scene_t0 = time.time()
+            transcribe_t0 = time.time()
+            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="pipe") as pool:
+                fut_scenes = pool.submit(
+                    self.scene_detector.detect,
+                    job_state.video_path,
+                    keyframes_dir,
+                )
+                if demux.audio_path:
+                    fut_segments = pool.submit(
+                        self.transcription_service.transcribe,
+                        demux.audio_path,
+                    )
+                else:
+                    fut_segments = None
 
-            # 2. Dịch âm thanh (Transcription)
-            self.job_manager.update_status(job_id, JobStatus.TRANSCRIBING)
-            start_time = time.time()
-            segments = self.transcription_service.transcribe(audio_path)
-            
+                # Resolve scene branch first; record its latency independently.
+                try:
+                    keyframes = fut_scenes.result()
+                except Exception as e:
+                    logger.error("Scene detection that bai: %s", e)
+                    keyframes = []
+                self.job_manager.update_latency(
+                    job_id, "scene_detection", time.time() - scene_t0
+                )
+
+                # Resolve transcription branch.
+                segments: list[dict] = []
+                if fut_segments is not None:
+                    try:
+                        segments = fut_segments.result()
+                    except Exception as e:
+                        logger.error("Transcription that bai: %s", e)
+                        segments = []
+                    self.job_manager.update_latency(
+                        job_id, "transcription", time.time() - transcribe_t0
+                    )
+
             if not segments:
-                raise Exception("Lỗi khi dịch âm thanh (không có segments).")
-            
-            self.job_manager.update_latency(job_id, "transcription", time.time() - start_time)
+                logger.warning(
+                    "Job %s khong co segments transcript (video khong loi?).",
+                    job_id,
+                )
 
-            # 3. Lập chỉ mục RAG (Indexing) - Tích hợp cả keyframes cho visual evidence
+            # ------------------------------------------------------------------
+            # 4. Build vector index from segments + keyframes
+            # ------------------------------------------------------------------
             self.job_manager.update_status(job_id, JobStatus.INDEXING)
-            start_time = time.time()
+            t0 = time.time()
             index_path = os.path.join(job_dir, "index")
+            if not self.rag_service.build_index_from_segments(
+                segments, index_path, keyframes=keyframes
+            ):
+                raise Exception("Loi khi xay dung Index.")
+            self.job_manager.update_latency(job_id, "indexing", time.time() - t0)
 
-            # Xây dựng index với keyframes metadata
-            if not self.rag_service.build_index_from_segments(segments, index_path, keyframes=keyframes):
-                raise Exception("Lỗi khi xây dựng Index.")
-            
-            self.job_manager.update_latency(job_id, "indexing", time.time() - start_time)
-
-            # 4. Sinh tóm tắt ban đầu & Trích xuất kiến thức (Qwen Map-Reduce)
+            # ------------------------------------------------------------------
+            # 5. Generate summary (and flashcards/quiz inline)
+            # ------------------------------------------------------------------
             self.job_manager.update_status(job_id, JobStatus.GENERATING_SUMMARY)
-            start_time = time.time()
-            
-            context_nodes = self.rag_service.query("Tóm tắt nội dung chi tiết bài giảng", top_k=30)
+            t0 = time.time()
+            context_nodes = self.rag_service.query(
+                "Tom tat noi dung chi tiet bai giang", top_k=30
+            )
             summary_output = self.generation_service.generate_summary(context_nodes)
-            
-            # Lấy các flashcards/quiz đã trích xuất đồng thời
             materials = self.generation_service.get_extracted_materials()
-            
+
             job_state = self.job_manager.get_job_state(job_id)
+            if not job_state:
+                raise Exception("Khong tim thay job sau khi xu ly xong.")
+
             job_state.summary = summary_output
             job_state.flashcards = materials["flashcards"]
             job_state.quiz = materials["quiz"]
-            
-            # Đánh dấu các tính năng đã sẵn sàng ngay lập tức
             job_state.features["summary"] = FeatureStatus.READY
             job_state.features["chat"] = FeatureStatus.READY
             job_state.features["flashcards"] = FeatureStatus.READY
             job_state.features["mini_test"] = FeatureStatus.READY
-            
             self.job_manager.save_job_state(job_state)
-            
-            self.job_manager.update_latency(job_id, "generation_qwen_concurrent", time.time() - start_time)
+            self.job_manager.update_latency(
+                job_id, "generation", time.time() - t0
+            )
 
-            # Hoàn tất
             self.job_manager.update_status(job_id, JobStatus.COMPLETED)
-            logger.info(f"Job {job_id} hoàn thành với model Qwen 3.6 Plus.")
+            logger.info("Job %s hoan thanh.", job_id)
             return True
 
         except Exception as e:
-            logger.error(f"Pipeline thất bại tại job {job_id}: {str(e)}")
-            self.job_manager.update_status(job_id, JobStatus.FAILED, error_message=str(e))
+            import traceback
+
+            error_detail = traceback.format_exc()
+            logger.error(
+                "[PIPELINE ERROR] tai job %s:\n%s", job_id, error_detail
+            )
+            self.job_manager.update_status(
+                job_id, JobStatus.FAILED, error_message=str(e)
+            )
             return False
-            
+
     def generate_on_demand_feature(self, job_id: str, feature: str) -> bool:
-        """
-        Sinh các tính năng bổ trợ khi có yêu cầu từ người dùng.
-        """
+        """Sinh cac tinh nang bo tro khi co yeu cau tu nguoi dung."""
         try:
             job_state = self.job_manager.get_job_state(job_id)
-            if not job_state: return False
-            
-            self.job_manager.update_feature_status(job_id, feature, FeatureStatus.PROCESSING)
-            
-            # Load index nếu chưa có
-            index_path = os.path.join(os.path.dirname(job_state.video_path), "index")
-            self.rag_service.load_index(index_path)
-            
+            if not job_state:
+                return False
+
+            self.job_manager.update_feature_status(
+                job_id, feature, FeatureStatus.PROCESSING
+            )
+
+            index_path = os.path.join(
+                os.path.dirname(job_state.video_path), "index"
+            )
+            if not self.rag_service.load_index(index_path):
+                raise Exception("Khong the tai index cua job.")
+
             if feature == "flashcards":
-                nodes = self.rag_service.query("Các định nghĩa, công thức và thuật ngữ quan trọng", top_k=15)
+                nodes = self.rag_service.query(
+                    "Cac dinh nghia, cong thuc va thuat ngu quan trong",
+                    top_k=15,
+                )
                 cards = self.generation_service.generate_flashcards(nodes)
+                if not cards:
+                    raise Exception(
+                        "Khong tao duoc flashcards tu noi dung video."
+                    )
                 job_state.flashcards = cards
             elif feature == "mini_test":
-                nodes = self.rag_service.query("Nội dung quan trọng để kiểm tra kiến thức", top_k=15)
+                nodes = self.rag_service.query(
+                    "Noi dung quan trong de kiem tra kien thuc", top_k=15
+                )
                 questions = self.generation_service.generate_quiz(nodes)
+                if not questions:
+                    raise Exception(
+                        "Khong tao duoc mini-test tu noi dung video."
+                    )
                 job_state.quiz = questions
-            
+
             job_state.features[feature] = FeatureStatus.READY
             self.job_manager.save_job_state(job_state)
             return True
-            
+
         except Exception as e:
-            logger.error(f"Lỗi sinh {feature}: {str(e)}")
-            self.job_manager.update_feature_status(job_id, feature, FeatureStatus.FAILED)
+            logger.error("Loi sinh %s: %s", feature, str(e))
+            self.job_manager.update_feature_status(
+                job_id, feature, FeatureStatus.FAILED
+            )
             return False

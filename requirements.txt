@@ -1,17 +1,19 @@
 # Web Frameworks (FastAPI Backend)
 fastapi
 uvicorn
+python-multipart  # required by FastAPI for UploadFile / File(...)
 
-# AI Frameworks (RAG & Qwen 3.6 Plus Orchestration)
+# AI Frameworks (RAG & Qwen Orchestration)
 llama-index
-llama-index-llms-dashscope
+llama-index-llms-openai          # actually imported by generation_service
 llama-index-embeddings-huggingface
 
 # Transcription & Audio/Video Processing
 faster-whisper
-moviepy
+scenedetect[opencv]              # PySceneDetect for keyframe extraction (Phase 1)
 opencv-python
 pydantic
+# Note: ffmpeg + ffprobe must be available on PATH for infra/media_demux.py
 
 # Environment & Utilities
 python-dotenv

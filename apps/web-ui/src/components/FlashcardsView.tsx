@@ -14,7 +14,7 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ cards }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [knownCount, setKnownCount] = useState(0);
   const [unknownCount, setUnknownCount] = useState(0);
-  const [results, setResults] = useState<'known' | 'unknown' | null[]>(new Array(cards.length).fill(null));
+  const [results, setResults] = useState<Array<'known' | 'unknown' | null>>(new Array(cards.length).fill(null));
 
   const currentCard = cards[currentIndex];
 

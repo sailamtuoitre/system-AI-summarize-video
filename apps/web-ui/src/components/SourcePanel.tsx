@@ -1,17 +1,21 @@
 import React, { useState } from 'react';
+import type { JobState, UploadResponse } from '../types/api';
 
 interface SourcePanelProps {
   currentJobId: string | null;
   setCurrentJobId: (id: string) => void;
-  jobState: any;
-  allJobs: any[];
+  jobState: JobState | null;
+  allJobs: JobState[];
   refreshJobs: () => void;
   isOpen: boolean;
   togglePanel: () => void;
+  apiBaseUrl: string;
 }
 
-const SourcePanel: React.FC<SourcePanelProps> = ({ currentJobId, setCurrentJobId, jobState, allJobs, refreshJobs, isOpen, togglePanel }) => {
+const SourcePanel: React.FC<SourcePanelProps> = ({ currentJobId, setCurrentJobId, jobState, allJobs, refreshJobs, isOpen, togglePanel, apiBaseUrl }) => {
   const [isUploading, setIsUploading] = useState(false);
+  const selectedJob = allJobs.find(job => job.job_id === currentJobId) || jobState;
+  const chunkProgress = selectedJob?.chunk_progress;
 
   // Helper function để hiển thị trạng thái job
   const getStatusDisplay = (status: string) => {
@@ -28,26 +32,39 @@ const SourcePanel: React.FC<SourcePanelProps> = ({ currentJobId, setCurrentJobId
     return `${statusInfo.icon} ${statusInfo.text}`;
   };
 
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Validate file extension
+    if (!file.name.toLowerCase().endsWith('.mp4')) {
+      setUploadError('Chỉ hỗ trợ file định dạng .mp4');
+      return;
+    }
+
     setIsUploading(true);
+    setUploadError(null);
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-      const response = await fetch('http://localhost:8000/upload', {
+      const response = await fetch(`${apiBaseUrl}/upload`, {
         method: 'POST',
         body: formData,
       });
+      
       if (response.ok) {
-        const data = await response.json();
+        const data: UploadResponse = await response.json();
         setCurrentJobId(data.job_id);
         refreshJobs();
+      } else {
+        const errorData = await response.json().catch(() => ({ detail: 'Lỗi không xác định' }));
+        setUploadError(typeof errorData.detail === 'string' ? errorData.detail : 'Upload thất bại');
       }
-    } catch (error) {
-      console.error('Upload failed:', error);
+    } catch (error: any) {
+      setUploadError(`Không thể kết nối đến server: ${error.message}`);
     } finally {
       setIsUploading(false);
     }
@@ -84,8 +101,8 @@ const SourcePanel: React.FC<SourcePanelProps> = ({ currentJobId, setCurrentJobId
           </div>
           <div className="upload-title">{isUploading ? 'Đang tải lên...' : 'Thêm video học thuật'}</div>
           <div className="upload-sub">MP4 · Khuyến nghị &lt; 120 phút</div>
-          <button 
-            className="btn-upload" 
+          <button
+            className="btn-upload"
             disabled={isUploading}
             onClick={(e) => {
               e.stopPropagation(); // Ngăn sự kiện click bị lặp lại do div cha cũng có onClick
@@ -94,11 +111,35 @@ const SourcePanel: React.FC<SourcePanelProps> = ({ currentJobId, setCurrentJobId
           >
             {isUploading ? 'Vui lòng đợi...' : '+ Tải lên'}
           </button>
+          {uploadError && (
+            <div style={{ marginTop: '10px', padding: '8px 12px', backgroundColor: '#FEE2E2', border: '1px solid #FCA5A5', borderRadius: '8px', color: '#991B1B', fontSize: '12px' }}>
+              ⚠️ {uploadError}
+            </div>
+          )}
         </div>
 
         <div style={{ padding: '6px 0 2px' }}>
           <div className="section-label">Đã lưu</div>
         </div>
+
+        {chunkProgress && chunkProgress.total_chunks > 0 && selectedJob?.status !== 'completed' && (
+          <div style={{ margin: '0 0 10px', padding: '10px 12px', background: '#F8FAFC', border: '1px solid #E5E7EB', borderRadius: '10px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>
+              Tiến độ xử lý chunk
+            </div>
+            <div style={{ fontSize: '11px', color: '#6B7280', marginBottom: '6px' }}>
+              {chunkProgress.processed_chunks}/{chunkProgress.total_chunks} chunk · {chunkProgress.chunk_duration_seconds}s/chunk
+            </div>
+            <div className="progress-bar">
+              <div
+                className="progress-fill"
+                style={{
+                  width: `${Math.min(100, (chunkProgress.processed_chunks / chunkProgress.total_chunks) * 100)}%`
+                }}
+              ></div>
+            </div>
+          </div>
+        )}
 
         <div className="card-list-container">
           {allJobs.map((job, index) => {

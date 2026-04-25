@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 from enum import Enum
 from datetime import datetime
@@ -37,10 +37,16 @@ class Flashcard(BaseModel):
     latex: Optional[str] = Field(None, description="Công thức toán học nếu có")
     evidence: Evidence
 
+class ChunkProgress(BaseModel):
+    """Theo dõi tiến độ xử lý video theo từng chunk."""
+    chunk_duration_seconds: int = 180
+    total_chunks: int = 0
+    processed_chunks: int = 0
+
 class QuizQuestion(BaseModel):
     """Cấu trúc dữ liệu cho một câu hỏi trắc nghiệm."""
     question: str = Field(..., description="Nội dung câu hỏi")
-    options: List[str] = Field(..., min_items=4, max_items=4, description="Danh sách 4 lựa chọn A, B, C, D")
+    options: List[str] = Field(..., min_length=4, max_length=4, description="Danh sách 4 lựa chọn A, B, C, D")
     answer: str = Field(..., description="Đáp án đúng")
     explanation: str = Field(..., description="Giải thích chi tiết lý do chọn đáp án")
     evidence: Evidence
@@ -55,20 +61,23 @@ class JobState(BaseModel):
     completed_at: Optional[datetime] = None
     
     # Trạng thái các tính năng phụ
-    features: Dict[str, FeatureStatus] = {
-        "summary": FeatureStatus.NOT_STARTED,
-        "chat": FeatureStatus.NOT_STARTED,
-        "flashcards": FeatureStatus.NOT_STARTED,
-        "mini_test": FeatureStatus.NOT_STARTED
-    }
+    features: Dict[str, FeatureStatus] = Field(
+        default_factory=lambda: {
+            "summary": FeatureStatus.NOT_STARTED,
+            "chat": FeatureStatus.NOT_STARTED,
+            "flashcards": FeatureStatus.NOT_STARTED,
+            "mini_test": FeatureStatus.NOT_STARTED,
+        }
+    )
     
     # Kết quả xử lý
     summary: Optional[SummaryOutput] = None
-    flashcards: List[Flashcard] = []
-    quiz: List[QuizQuestion] = []
+    flashcards: List[Flashcard] = Field(default_factory=list)
+    quiz: List[QuizQuestion] = Field(default_factory=list)
+    chunk_progress: ChunkProgress = Field(default_factory=ChunkProgress)
     
     # Log hiệu suất
-    latency: Dict[str, float] = {}
+    latency: Dict[str, float] = Field(default_factory=dict)
     error_message: Optional[str] = None
 
     class Config:
