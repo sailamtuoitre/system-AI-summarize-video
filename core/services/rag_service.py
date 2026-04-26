@@ -60,18 +60,41 @@ class RAGService:
         """
         try:
             documents = []
-            
-            # 1. Tạo documents từ segments (kèm keyframes liên quan)
+
+            # Build a quick lookup of which keyframes have OCR/caption content
+            # so we can fuse it into the matching transcript segment's Document.
+            def _kf_text_block(kf: Dict[str, Any]) -> str:
+                """Return the slide content as plain text (OCR + caption)."""
+                parts: List[str] = []
+                ocr = (kf.get("ocr_text") or "").strip()
+                cap = (kf.get("caption") or "").strip()
+                if ocr:
+                    parts.append(f"[Slide text @ {self._format_timestamp(kf['timestamp'])}]\n{ocr}")
+                if cap:
+                    parts.append(f"[Slide caption @ {self._format_timestamp(kf['timestamp'])}]\n{cap}")
+                return "\n\n".join(parts)
+
+            # 1. Tạo documents từ segments (kèm keyframes liên quan + OCR/caption)
             for seg in segments:
                 related_keyframes = []
+                kf_blocks: List[str] = []
                 if keyframes:
                     for kf in keyframes:
                         time_diff = abs(kf["timestamp"] - seg["start"])
                         if time_diff <= 30:
                             related_keyframes.append(kf)
+                            block = _kf_text_block(kf)
+                            if block:
+                                kf_blocks.append(block)
+
+                # Concatenate transcript segment text with any nearby slide
+                # OCR / VLM caption so the embedder sees both modalities.
+                doc_text = seg["text"]
+                if kf_blocks:
+                    doc_text = doc_text + "\n\n" + "\n\n".join(kf_blocks)
 
                 doc = Document(
-                    text=seg["text"],
+                    text=doc_text,
                     metadata={
                         "start_time": seg["start"],
                         "end_time": seg["end"],
@@ -80,7 +103,9 @@ class RAGService:
                         "chunk_index": seg.get("chunk_index"),
                         "chunk_id": seg.get("chunk_id"),
                         "has_visual_evidence": len(related_keyframes) > 0,
-                        "keyframes": related_keyframes
+                        "keyframes": related_keyframes,
+                        "has_ocr": any(kf.get("ocr_text") for kf in related_keyframes),
+                        "has_caption": any(kf.get("caption") for kf in related_keyframes),
                     }
                 )
                 documents.append(doc)
@@ -89,15 +114,19 @@ class RAGService:
             if not documents and keyframes:
                 logger.info("Không có segments, đang tạo documents từ keyframes cho video không lời...")
                 for kf in keyframes:
+                    block = _kf_text_block(kf)
+                    text = block or f"[Visual Event at {self._format_timestamp(kf['timestamp'])}]"
                     doc = Document(
-                        text=f"[Visual Event at {self._format_timestamp(kf['timestamp'])}]",
+                        text=text,
                         metadata={
                             "start_time": kf["timestamp"],
                             "end_time": kf["timestamp"],
                             "timestamp_mmss": self._format_timestamp(kf["timestamp"]),
                             "segment_id": f"kf_{kf['timestamp']}",
                             "has_visual_evidence": True,
-                            "keyframes": [kf]
+                            "has_ocr": bool(kf.get("ocr_text")),
+                            "has_caption": bool(kf.get("caption")),
+                            "keyframes": [kf],
                         }
                     )
                     documents.append(doc)

@@ -10,6 +10,7 @@ from core.services.rag_service import RAGService
 from core.services.transcription_service import TranscriptionService
 from processing.media_demux import MediaDemuxer
 from processing.scene_detector import SceneDetector
+from processing.keyframe_analyzer import KeyframeAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class VideoOrchestrator:
         transcription_service: TranscriptionService,
         rag_service: RAGService,
         generation_service: GenerationService,
+        keyframe_analyzer: KeyframeAnalyzer | None = None,
     ):
         self.job_manager = job_manager
         self.media_demuxer = media_demuxer
@@ -44,6 +46,12 @@ class VideoOrchestrator:
         self.transcription_service = transcription_service
         self.rag_service = rag_service
         self.generation_service = generation_service
+        # Optional Phase 4 stage; if None or OCR_ENABLED=false the
+        # orchestrator simply skips the analysis step.
+        self.keyframe_analyzer = keyframe_analyzer
+        self.ocr_enabled = os.getenv("OCR_ENABLED", "false").lower() in (
+            "1", "true", "yes", "on",
+        )
 
     def run_initial_pipeline(self, job_id: str) -> bool:
         try:
@@ -116,6 +124,28 @@ class VideoOrchestrator:
                 logger.warning(
                     "Job %s khong co segments transcript (video khong loi?).",
                     job_id,
+                )
+
+            # ------------------------------------------------------------------
+            # 3.5. Keyframe analysis cascade (PaddleOCR -> Qwen-VL fallback)
+            # ------------------------------------------------------------------
+            # Optional Phase 4 stage. Adds `ocr_text` and `caption` to each
+            # keyframe so the RAG layer can index slide content alongside
+            # transcripts. Skipped silently when disabled.
+            if (
+                self.ocr_enabled
+                and self.keyframe_analyzer is not None
+                and keyframes
+            ):
+                analyze_t0 = time.time()
+                try:
+                    keyframes = self.keyframe_analyzer.analyze(keyframes)
+                except Exception as e:
+                    logger.warning(
+                        "KeyframeAnalyzer that bai: %s. Tiep tuc khong co OCR.", e
+                    )
+                self.job_manager.update_latency(
+                    job_id, "keyframe_analysis", time.time() - analyze_t0
                 )
 
             # ------------------------------------------------------------------

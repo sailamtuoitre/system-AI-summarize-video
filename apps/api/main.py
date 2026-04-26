@@ -12,6 +12,9 @@ from core.services.rag_service import RAGService
 from core.services.generation_service import GenerationService
 from processing.media_demux import MediaDemuxer
 from processing.scene_detector import SceneDetector
+from processing.ocr_paddle import PaddleOCRService
+from processing.vlm_qwen import QwenVLService
+from processing.keyframe_analyzer import KeyframeAnalyzer
 
 # Load environment variables
 load_dotenv()
@@ -62,6 +65,22 @@ generation_service = GenerationService(
     base_url=os.getenv("NINE_ROUTER_URL"),
 )
 
+# --- Phase 4: Keyframe analysis cascade (PaddleOCR -> Qwen-VL fallback) ---
+# Disabled by default; flip OCR_ENABLED=true to turn it on.
+_ocr_lang = os.getenv("OCR_LANG", "en")
+paddle_ocr = PaddleOCRService(lang=_ocr_lang, use_gpu=False)
+_vlm_enabled = os.getenv("VLM_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+qwen_vl = (
+    QwenVLService(
+        api_key=os.getenv("NINE_ROUTER_API_KEY", os.getenv("DASHSCOPE_API_KEY")),
+        model_name=os.getenv("VLM_MODEL_NAME", "qw/qwen-vl-plus"),
+        base_url=os.getenv("NINE_ROUTER_URL"),
+    )
+    if _vlm_enabled
+    else None
+)
+keyframe_analyzer = KeyframeAnalyzer(ocr=paddle_ocr, vlm=qwen_vl)
+
 orchestrator = VideoOrchestrator(
     job_manager,
     media_demuxer,
@@ -69,6 +88,7 @@ orchestrator = VideoOrchestrator(
     transcription_service,
     rag_service,
     generation_service,
+    keyframe_analyzer=keyframe_analyzer,
 )
 
 @app.get("/")

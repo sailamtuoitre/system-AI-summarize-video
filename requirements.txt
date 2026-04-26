@@ -15,6 +15,11 @@ opencv-python
 pydantic
 # Note: ffmpeg + ffprobe must be available on PATH for processing/media_demux.py
 
+# OCR + VLM cascade (Phase 4) — OPTIONAL, only needed when OCR_ENABLED=true
+# PaddleOCR runs on CPU; Qwen-VL goes through 9router so no local GPU is needed.
+# paddleocr
+# paddlepaddle
+
 # Environment & Utilities
 python-dotenv
 aiofiles

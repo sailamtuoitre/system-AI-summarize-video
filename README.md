@@ -81,6 +81,15 @@ SCENE_THRESHOLD=27.0            # PySceneDetect ContentDetector threshold
 MIN_SCENE_LEN_SEC=1.5           # min scene length
 MAX_UPLOAD_BYTES=524288000      # 500 MB upload cap
 MAP_PHASE_CONCURRENCY=4         # so call LLM song song trong Map phase (Phase 2)
+
+# Phase 4 — OCR + VLM cascade (mac dinh TAT)
+OCR_ENABLED=false               # bat de chay PaddleOCR + Qwen-VL tren keyframes
+OCR_LANG=en                     # vi / en / ch / japan / korean / fr / de ...
+OCR_MIN_TEXT_LEN=50             # < ky tu nay -> goi VLM mo ta anh
+KEYFRAME_CONCURRENCY=4          # so keyframe phan tich song song
+VLM_ENABLED=true                # tat de chi dung OCR (khong goi VLM)
+VLM_MODEL_NAME=qw/qwen-vl-plus  # ten model multimodal tren 9router
+
 LOG_LEVEL=INFO
 
 # CORS (toi uu cho dev mac dinh)
