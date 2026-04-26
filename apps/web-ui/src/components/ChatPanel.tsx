@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import FlashcardsView from './FlashcardsView';
 import MiniTestView from './MiniTestView';
-import type { ChatResponse, JobState } from '../types/api';
+import type { ChatResponse, JobState, SourceCitation } from '../types/api';
 
 interface ChatPanelProps {
   jobId: string | null;
@@ -19,6 +19,7 @@ interface Message {
   role: 'user' | 'ai';
   content: string;
   sources?: string[];
+  sourceDetails?: SourceCitation[];
 }
 
 const ChatPanel: React.FC<ChatPanelProps> = ({ 
@@ -67,10 +68,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       });
       if (response.ok) {
         const data: ChatResponse = await response.json();
-        setMessages(prev => [...prev, { 
-          role: 'ai', 
+        setMessages(prev => [...prev, {
+          role: 'ai',
           content: data.answer,
-          sources: data.sources
+          sources: data.sources,
+          sourceDetails: data.source_details,
         }]);
       } else {
         const errorData = await response.json().catch(() => ({ detail: 'Chat không thành công.' }));
@@ -111,7 +113,21 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
               <div key={i} className={`msg ${msg.role}`}>
                 {msg.content}
                 {msg.sources && msg.sources.length > 0 && (
-                  <div className="citation">📎 Nguồn: {msg.sources.join(', ')}</div>
+                  <div className="citation">
+                    📎 Nguồn: {(msg.sourceDetails && msg.sourceDetails.length === msg.sources.length
+                      ? msg.sourceDetails
+                      : msg.sources.map((t) => ({ timestamp: t, has_ocr: false, has_caption: false, has_visual_evidence: false }))
+                    ).map((src: any, idx) => (
+                      <span key={idx} className="src-chip" title={[
+                        src.has_ocr && 'OCR text from slide',
+                        src.has_caption && 'AI caption from slide',
+                      ].filter(Boolean).join(' · ') || 'Transcript only'}>
+                        {src.timestamp}
+                        {src.has_ocr && <span className="src-badge ocr" aria-label="OCR">📄</span>}
+                        {src.has_caption && <span className="src-badge vlm" aria-label="VLM caption">🤖</span>}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
             ))}
@@ -185,7 +201,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         .msg { max-width: 85%; padding: 10px 13px; border-radius: var(--border-radius-lg); font-size: 13px; line-height: 1.5; }
         .msg.ai { background: var(--color-background-secondary); border: 0.5px solid var(--color-border-tertiary); align-self: flex-start; }
         .msg.user { background: var(--color-primary); color: #fff; align-self: flex-end; }
-        .citation { margin-top: 6px; padding: 6px 8px; background: #EEEDFE; border-left: 2px solid var(--color-primary); border-radius: 0 8px 8px 0; font-size: 11px; color: #3C3489; }
+        .citation { margin-top: 6px; padding: 6px 8px; background: #EEEDFE; border-left: 2px solid var(--color-primary); border-radius: 0 8px 8px 0; font-size: 11px; color: #3C3489; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+        .src-chip { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; background: #fff; border: 0.5px solid #C7C2F0; border-radius: 999px; font-weight: 600; font-size: 10.5px; color: #3C3489; }
+        .src-badge { font-size: 10px; line-height: 1; }
+        .src-badge.ocr { color: #0F6E56; }
+        .src-badge.vlm { color: #B45309; }
         
         .chat-input-area { padding: 10px 12px; border-top: 0.5px solid var(--color-border-tertiary); display: flex; gap: 8px; background: #fff; }
         .chat-input { flex: 1; padding: 8px 12px; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); font-size: 13px; outline: none; }

@@ -89,6 +89,10 @@ OCR_MIN_TEXT_LEN=50             # < ky tu nay -> goi VLM mo ta anh
 KEYFRAME_CONCURRENCY=4          # so keyframe phan tich song song
 VLM_ENABLED=true                # tat de chi dung OCR (khong goi VLM)
 VLM_MODEL_NAME=qw/qwen-vl-plus  # ten model multimodal tren 9router
+DEIXIS_MIN_HITS=1               # Stage T: so cum tu visual toi thieu de chay Phase 4 (0 = tat gate)
+
+# Per-stage checkpoint / resume (mac dinh BAT)
+CHECKPOINT_ENABLED=true         # cache demux/scenes/segments/keyframes_phase4 vao data/jobs/<id>/checkpoints/
 
 LOG_LEVEL=INFO
 

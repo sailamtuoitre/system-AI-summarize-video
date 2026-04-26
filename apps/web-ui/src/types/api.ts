@@ -61,7 +61,17 @@ export interface UploadResponse {
   status: JobStatus;
 }
 
+export interface SourceCitation {
+  timestamp: string;
+  has_ocr: boolean;
+  has_caption: boolean;
+  has_visual_evidence: boolean;
+}
+
 export interface ChatResponse {
   answer: string;
   sources: string[];
+  // Phase 4 (v0.7): richer per-source flags so the UI can show
+  // OCR / VLM badges. Optional for backwards-compat with older backends.
+  source_details?: SourceCitation[];
 }

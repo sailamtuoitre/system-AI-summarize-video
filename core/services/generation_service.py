@@ -197,9 +197,25 @@ class GenerationService:
         )
         
         response = self.llm.complete(prompt)
+
+        # Build rich citation objects so the UI can show badges for slide
+        # text (OCR) vs AI caption (VLM) per source.
+        sources_rich: List[Dict[str, Any]] = []
+        for n in context_nodes:
+            meta = n.get("metadata", {}) or {}
+            sources_rich.append({
+                "timestamp": meta.get("timestamp_mmss", "00:00"),
+                "has_ocr": bool(meta.get("has_ocr")),
+                "has_caption": bool(meta.get("has_caption")),
+                "has_visual_evidence": bool(meta.get("has_visual_evidence")),
+            })
         return {
             "answer": response.text.strip(),
-            "sources": [n["metadata"]["timestamp_mmss"] for n in context_nodes]
+            # Backwards-compat: keep `sources` as a list of timestamps strings
+            # so existing clients keep working. New clients should prefer
+            # `source_details`.
+            "sources": [s["timestamp"] for s in sources_rich],
+            "source_details": sources_rich,
         }
 
     def generate_flashcards(self, context_nodes: List[Dict[str, Any]]) -> List[Flashcard]:
