@@ -1,4 +1,15 @@
-# Tổng quan Dự án: MVP AI Video Assistant (v0.5)
+# Tổng quan Dự án: MVP AI Video Assistant (v0.7)
+
+## Cập nhật v0.7 (Phase 4 — OCR + VLM cascade, CPU-friendly)
+- Thêm stage 3.5 phân tích keyframe: **PaddleOCR** (CPU) → fallback **Qwen-VL** qua 9router cho slide không đủ text (chart/diagram).
+- **Không cần GPU:** Qwen-VL đi qua 9router (HTTP + base64 image), giống hệt LLM văn bản.
+- Mặc định **tắt** (`OCR_ENABLED=false`) — pipeline cũ vẫn hoạt động nguyên vẹn.
+- OCR/caption được fuse vào `Document.text` của transcript segment trong cửa sổ ±30 s, nên RAG retrieve theo nội dung slide.
+- 7 biến môi trường mới: `OCR_ENABLED`, `OCR_LANG`, `OCR_MIN_TEXT_LEN`, `KEYFRAME_CONCURRENCY`, `VLM_ENABLED`, `VLM_MODEL_NAME`.
+
+## Cập nhật v0.6 (Phase 3 — Whisper tuning)
+- `beam_size=1` (mặc định mới), VAD chặt hơn, `cpu_threads=auto`, `num_workers=2`, language pin, confidence filter.
+- ~30-40% nhanh hơn cho audio dài.
 
 ## Cập nhật v0.5 (Phase 2)
 - Scene detection ∥ Whisper transcription (ThreadPoolExecutor 2 worker).
@@ -40,6 +51,8 @@ Công cụ hỗ trợ học tập thông minh dựa trên video bài giảng. H�
 | **HuggingFace MiniLM** | `sentence-transformers/all-MiniLM-L6-v2` | Embedding |
 | **FAISS** | `faiss-cpu` qua LlamaIndex | Vector store |
 | **Qwen (qua 9router)** | Alibaba / 9router | LLM tóm tắt, Q&A, flashcards, quiz |
+| **PaddleOCR** (Phase 4, opt-in) | Local CPU | OCR slide / code / formula |
+| **Qwen-VL-Plus** (Phase 4, opt-in) | 9router | Mô tả chart / diagram khi OCR mỏng |
 
 ## 5. Kỹ thuật xử lý video dài
 1. **Demux một lượt** — không tốn nhiều lần decode.
@@ -57,8 +70,8 @@ React Web App (`apps/web-ui`), Vite dev server tại `:5173`. Layout 3 panel.
 
 ## 8. Lộ trình
 - ✅ **Phase 3 (v0.6):** Whisper tuning — beam_size=1, VAD chặt hơn, cpu_threads, num_workers, language pin, confidence filter.
-- **Stage T (transcript-driven gating):** phân loại video bằng từ vựng deixis (`slide`, `như các bạn thấy`, ...).
-- **Stage C:** phash dedup + brightness gate cho keyframe.
-- **OCR + VLM cascade:** PaddleOCR mặc định, Qwen-VL chỉ khi OCR quá ít chữ.
+- ✅ **Phase 4 (v0.7):** OCR + VLM cascade — PaddleOCR (CPU) + Qwen-VL via 9router. Opt-in qua `OCR_ENABLED`.
+- **Stage T (transcript-driven gating):** phân loại video bằng từ vựng deixis (`slide`, `như các bạn thấy`, ...) để tắt visual extraction khi không cần.
+- **Stage C:** phash dedup + brightness gate cho keyframe (extend Phase 4).
 - **Per-stage checkpoint:** resume sau crash.
 - **Cluster-based summary + structured JSON output.**

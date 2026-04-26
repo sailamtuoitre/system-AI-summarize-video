@@ -1,4 +1,18 @@
-# Đặc tả Dữ liệu (v0.5)
+# Đặc tả Dữ liệu (v0.7)
+
+## Cập nhật v0.7 (Phase 4 — OCR + VLM cascade)
+- `JobState.latency` có thêm key `keyframe_analysis` (giây) khi `OCR_ENABLED=true`.
+- Mỗi keyframe trong `JobState`/RAG metadata (sau Phase 4) có thể mang thêm:
+  - `ocr_text` (string) — văn bản PaddleOCR trích xuất (có thể rỗng).
+  - `caption` (string) — mô tả từ Qwen-VL khi OCR "mỏng" (có thể rỗng).
+  - `analysis_used_vlm` (bool) — có fallback sang VLM hay không.
+- Vector node metadata có hai cờ mới: `has_ocr` và `has_caption`.
+- Nội dung `Document.text` trong RAG được **fuse** transcript segment + OCR/caption của các keyframe trong cửa sổ ±30s, nên truy vấn hỏi về “nội dung trên slide” vẫn hit đúng đoạn thời gian.
+- Schema khác không đổi; không có breaking change.
+
+## Cập nhật v0.6 (Phase 3 — Whisper tuning)
+- Không đổi schema. Thêm log fields trong transcription: `language`, `language_probability`, `dropped_low_conf`.
+- `latency.transcription` thường giảm ~30-40% so với v0.5 nhờ `beam_size=1`, VAD chặt hơn, threading.
 
 ## Cập nhật v0.5 (Phase 2)
 - `latency.scene_detection` và `latency.transcription` giờ **chạy song song** — tổng wall-clock của 2 giai đoạn này ≈ `max(scene_detection, transcription)`, không phải tổng cộng.
@@ -50,6 +64,7 @@
     "demux": 28.4,
     "scene_detection": 12.7,
     "transcription": 540.1,
+    "keyframe_analysis": 8.3,
     "indexing": 31.0,
     "generation": 95.6
   },
@@ -119,6 +134,8 @@
   "chunk_index": null,
   "chunk_id": null,
   "has_visual_evidence": true,
+  "has_ocr": true,
+  "has_caption": false,
   "keyframes": [
     {
       "scene_index": 0,
@@ -126,7 +143,10 @@
       "end": 12.4,
       "timestamp": 6.2,
       "time_str": "00:06",
-      "path": "./data/jobs/<id>/keyframes/scene_0000_000006s.jpg"
+      "path": "./data/jobs/<id>/keyframes/scene_0000_000006s.jpg",
+      "ocr_text": "...",
+      "caption": "",
+      "analysis_used_vlm": false
     }
   ],
   "similarity_score": 0.87
@@ -146,7 +166,9 @@
 }
 ```
 
-## 7. Keyframe Schema (output `SceneDetector.detect`)
+## 7. Keyframe Schema
+
+### 7.1 Output của `SceneDetector.detect` (Phase 1)
 ```json
 {
   "scene_index": 0,
@@ -157,6 +179,24 @@
   "path": "./data/jobs/<id>/keyframes/scene_0000_000006s.jpg"
 }
 ```
+
+### 7.2 Sau `KeyframeAnalyzer.analyze` (Phase 4, chỉ khi `OCR_ENABLED=true`)
+```json
+{
+  "scene_index": 0,
+  "start": 0.0,
+  "end": 12.4,
+  "timestamp": 6.2,
+  "time_str": "00:06",
+  "path": "./data/jobs/<id>/keyframes/scene_0000_000006s.jpg",
+  "ocr_text": "Slide title\nBụllet 1\nBụllet 2",
+  "caption": "",
+  "analysis_used_vlm": false
+}
+```
+- Nếu `len(ocr_text.strip()) < OCR_MIN_TEXT_LEN` (mặc định 50), `caption` được sinh bởi Qwen-VL và `analysis_used_vlm=true`.
+- Cả hai trường đều có thể rỗng (fail-soft) — pipeline không vỡ.
+
 
 ## 8. Model Configuration (v0.4)
 ```json
@@ -211,7 +251,22 @@
   "parallelism": {
     "scene_and_transcribe": "ThreadPoolExecutor(max_workers=2)",
     "map_phase_concurrency": 4,
-    "map_phase_concurrency_env": "MAP_PHASE_CONCURRENCY"
+    "map_phase_concurrency_env": "MAP_PHASE_CONCURRENCY",
+    "keyframe_concurrency": 4,
+    "keyframe_concurrency_env": "KEYFRAME_CONCURRENCY"
+  },
+  "ocr": {
+    "enabled_env": "OCR_ENABLED",
+    "engine": "PaddleOCR",
+    "device": "cpu",
+    "lang_env": "OCR_LANG",
+    "min_text_len_env": "OCR_MIN_TEXT_LEN"
+  },
+  "vlm": {
+    "enabled_env": "VLM_ENABLED",
+    "model_env": "VLM_MODEL_NAME",
+    "default_model": "qw/qwen-vl-plus",
+    "provider": "qwen-vl-via-9router (OpenAI-compatible chat.completions, image_url base64)"
   }
 }
 ```

@@ -1,4 +1,19 @@
-# Kiến trúc Hệ thống: Multi-modal RAG Pipeline (v0.6)
+# Kiến trúc Hệ thống: Multi-modal RAG Pipeline (v0.7)
+
+## Cập nhật v0.7 (Phase 4 — OCR + VLM cascade, CPU-friendly)
+- **Mục tiêu:** đưa nội dung visual (slide, code, biểu đồ) vào RAG mà **không cần GPU**.
+- **Cascade:**
+  1. `PaddleOCRService` (CPU) đọc text trên mỗi keyframe (~0.3-1 s/frame).
+  2. Nếu `len(ocr_text) < OCR_MIN_TEXT_LEN` (mặc định 50) → coi là chart/diagram → fall through sang `QwenVLService` để mô tả ảnh qua **9router** (`qw/qwen-vl-plus`, OpenAI-compatible chat.completions multipart). **Không cần GPU local** — chỉ là HTTP call.
+  3. Cả `ocr_text` và `caption` được fuse vào `Document.text` của transcript segment trong cửa sổ ±30 s, nên truy vấn về "slide nói gì" hit đúng đoạn thời gian.
+- **Module mới:**
+  - `processing/ocr_paddle.py` — `PaddleOCRService` (lazy-init, fail-soft).
+  - `processing/vlm_qwen.py` — `QwenVLService` qua OpenAI SDK 2.x, base64 data URL.
+  - `processing/keyframe_analyzer.py` — orchestrator của cascade, parallel `KEYFRAME_CONCURRENCY` (mặc định 4).
+- **Wired vào `VideoOrchestrator`** thành **stage 3.5** giữa Scene/Transcribe và Indexing. Tracked riêng qua `latency.keyframe_analysis`.
+- **Mặc định TẮT** (`OCR_ENABLED=false`) → pipeline chạy giống v0.6. Bật qua env không đổi code.
+- **Optional dependency:** `paddleocr`, `paddlepaddle` (đã comment trong `requirements.txt`).
+- **Chi phí ước tính (lecture 30 phút, ~30 keyframes):** ~10 s wall-clock thêm + ~$0.025 cho ~5 VLM calls.
 
 ## Cập nhật v0.6 (Phase 3 — Whisper tuning)
 - `TranscriptionService` được tinh chỉnh nhiều tham số có thể đổi qua env:
@@ -39,6 +54,7 @@
 - **Audio Processing (`TranscriptionService`):** Faster-Whisper xử lý toàn bộ audio.wav một lần (VAD bật sẵn). Không cần chunk.
 - **Data & Retrieval (`RAGService`):** LlamaIndex + FAISS lưu transcript segment + keyframe metadata; embedding HuggingFace `all-MiniLM-L6-v2` được đăng ký global.
 - **Generation (`GenerationService`):** Qwen qua 9router (OpenAI-compatible). Sinh tóm tắt Map-Reduce, đồng thời trích Flashcards / Quiz.
+- **Keyframe Analysis (`KeyframeAnalyzer`, Phase 4, opt-in):** Cascade `PaddleOCRService` (CPU) → `QwenVLService` (qua 9router) để gắn OCR + caption vào mỗi keyframe.
 
 ## 2. Luồng Tương tác (Interaction Flow)
 1. **Giai đoạn 1 (Tự động):**
@@ -46,8 +62,9 @@
    2. `MediaDemuxer.run()` → `audio.wav` + `frames/`.
    3. `SceneDetector.detect()` → `keyframes/`.
    4. Whisper trên `audio.wav` → `segments[]` (timestamp toàn cục, không cần offset).
-   5. `RAGService.build_index_from_segments(segments, keyframes)` → FAISS index.
-   6. `GenerationService.generate_summary(...)` → summary + flashcards + quiz.
+   5. **(Phase 4, tùy chọn)** `KeyframeAnalyzer.analyze(keyframes)` → gắn `ocr_text` + `caption` vào từng keyframe (skip nếu `OCR_ENABLED=false`).
+   6. `RAGService.build_index_from_segments(segments, keyframes)` → FAISS index (Document.text fuse transcript + slide content).
+   7. `GenerationService.generate_summary(...)` → summary + flashcards + quiz.
 2. **Giai đoạn 2 (Hỏi đáp):**
    - User đặt câu hỏi → RAG retrieve top-k → Qwen trả lời kèm timestamp + (nếu có) keyframe liên quan.
 3. **Giai đoạn 3 (Studio):**
@@ -71,6 +88,8 @@
 | **Embedding** | `sentence-transformers/all-MiniLM-L6-v2` | HuggingFace | Vector hoá segment |
 | **Vector Store** | FAISS qua LlamaIndex | Local | Lưu / truy vấn |
 | **LLM** | Qwen (qua 9router, OpenAI-compatible) | Alibaba / 9router | Tóm tắt, Q&A, flashcards, quiz |
+| **OCR** (Phase 4) | PaddleOCR (CPU) | Local (`paddleocr`, optional) | Text trên keyframe |
+| **VLM** (Phase 4) | Qwen-VL-Plus | 9router (OpenAI-compatible) | Mô tả chart/diagram khi OCR mỏng |
 
 ### 4.2 Sơ đồ luồng xử lý
 
@@ -86,8 +105,13 @@ Video MP4
 │   └─ segments[]               │   └─ keyframes[] (midpoint/scene)│   qua ThreadPool)
 └───────────────────────────────┴───────────────────────────────┘
   ↓
+[KeyframeAnalyzer]  (Phase 4, opt-in via OCR_ENABLED)
+  ├─ PaddleOCR (CPU, parallel KEYFRAME_CONCURRENCY)
+  └─ Qwen-VL via 9router (fallback khi OCR < OCR_MIN_TEXT_LEN)
+  → keyframes[] augmented với { ocr_text, caption }
+  ↓
 [RAGService.build_index_from_segments]
-  └─ FAISS index (segment + keyframe metadata)
+  └─ FAISS index (segment + keyframe metadata + fused OCR/caption text)
   ↓
 [GenerationService] (Qwen Map-Reduce, Map chạy song song N=MAP_PHASE_CONCURRENCY)
   └─ Summary + Flashcards + Quiz
@@ -112,6 +136,12 @@ Video MP4
 | `WHISPER_NUM_WORKERS` | `2` | ctranslate2 pipeline workers (Phase 3) |
 | `WHISPER_LANGUAGE` | *(auto)* | Pin ngôn ngữ, bỏ qua detect (Phase 3) |
 | `WHISPER_MIN_CONFIDENCE` | `-1.0` | Drop segment có avg_logprob thấp; -1 = tắt (Phase 3) |
+| `OCR_ENABLED` | `false` | Bật cascade Phase 4 (PaddleOCR + Qwen-VL) |
+| `OCR_LANG` | `en` | Ngôn ngữ PaddleOCR (`vi`/`en`/`ch`/...) |
+| `OCR_MIN_TEXT_LEN` | `50` | < ngưỡng → fall through sang VLM (Phase 4) |
+| `KEYFRAME_CONCURRENCY` | `4` | Song song khi phân tích keyframe (Phase 4) |
+| `VLM_ENABLED` | `true` | Tắt để chỉ dùng OCR (Phase 4) |
+| `VLM_MODEL_NAME` | `qw/qwen-vl-plus` | Model multimodal trên 9router (Phase 4) |
 
 ## 6. Yêu cầu hệ thống
 
