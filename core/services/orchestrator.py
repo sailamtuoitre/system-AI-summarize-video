@@ -8,8 +8,8 @@ from core.services.generation_service import GenerationService
 from core.services.job_manager import JobManager
 from core.services.rag_service import RAGService
 from core.services.transcription_service import TranscriptionService
-from infra.media_demux import MediaDemuxer
-from infra.scene_detector import SceneDetector
+from processing.media_demux import MediaDemuxer
+from processing.scene_detector import SceneDetector
 
 logger = logging.getLogger(__name__)
 

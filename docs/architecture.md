@@ -27,8 +27,8 @@
   - `extracted_flashcards` / `extracted_quiz` được khởi tạo trong `__init__` của `GenerationService`.
   - `requirements.txt`: bổ sung `python-multipart`, thay `llama-index-llms-dashscope` bằng `llama-index-llms-openai`, gỡ `moviepy`.
 - **Phase 1 — pipeline mới:**
-  - **Một lượt decode** bằng `ffmpeg` (qua `infra/media_demux.py`) thay thế chuỗi moviepy `VideoChunker` + `AudioExtractor`.
-  - **PySceneDetect** (`infra/scene_detector.py`) thay cho vòng lặp pixel-diff trong `visual_processor.py`. Mỗi scene lưu một keyframe đại diện ở midpoint.
+  - **Một lượt decode** bằng `ffmpeg` (qua `processing/media_demux.py`) thay thế chuỗi moviepy `VideoChunker` + `AudioExtractor`.
+  - **PySceneDetect** (`processing/scene_detector.py`) thay cho vòng lặp pixel-diff trong `visual_processor.py`. Mỗi scene lưu một keyframe đại diện ở midpoint.
   - **Whisper chạy trên toàn bộ audio.wav** một lần duy nhất, không còn ghép timestamp theo chunk offset.
   - Loại bỏ phụ thuộc moviepy khỏi hot path; chỉ cần `ffmpeg` và `ffprobe` trong `PATH`.
 

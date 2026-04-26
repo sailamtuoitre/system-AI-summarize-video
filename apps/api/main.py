@@ -10,8 +10,8 @@ from core.services.orchestrator import VideoOrchestrator
 from core.services.transcription_service import TranscriptionService
 from core.services.rag_service import RAGService
 from core.services.generation_service import GenerationService
-from infra.media_demux import MediaDemuxer
-from infra.scene_detector import SceneDetector
+from processing.media_demux import MediaDemuxer
+from processing.scene_detector import SceneDetector
 
 # Load environment variables
 load_dotenv()

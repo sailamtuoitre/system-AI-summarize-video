@@ -129,7 +129,7 @@ CDIO 3/
 |-- core/
 |   |-- services/         # Orchestrator, RAG, Generation, Transcription, JobManager
 |   `-- domain/           # Pydantic models
-|-- infra/
+|-- processing/
 |   |-- media_demux.py    # ffmpeg + ffprobe wrapper (Phase 1)
 |   `-- scene_detector.py # PySceneDetect (Phase 1)
 |-- data/jobs/            # Per-job: video.mp4, audio.wav, frames/, keyframes/, index/

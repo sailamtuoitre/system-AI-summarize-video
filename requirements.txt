@@ -13,7 +13,7 @@ faster-whisper
 scenedetect[opencv]              # PySceneDetect for keyframe extraction (Phase 1)
 opencv-python
 pydantic
-# Note: ffmpeg + ffprobe must be available on PATH for infra/media_demux.py
+# Note: ffmpeg + ffprobe must be available on PATH for processing/media_demux.py
 
 # Environment & Utilities
 python-dotenv

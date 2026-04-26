@@ -34,8 +34,8 @@ def main(video_path: str, keep: bool = False) -> int:
         log.error("Video khong ton tai: %s", video_path)
         return 2
 
-    from infra.media_demux import MediaDemuxer
-    from infra.scene_detector import SceneDetector
+    from processing.media_demux import MediaDemuxer
+    from processing.scene_detector import SceneDetector
     from core.services.transcription_service import TranscriptionService
     from core.services.rag_service import RAGService
 
